@@ -1,0 +1,17 @@
+{
+  "site_name": "赤霞书斋",
+  "subtitle": "小说创作与笔记",
+  "author": "CYXB",
+  "description": "",
+  "base_url": "https://github.com/CanYueXB/Blog",
+  "footer_text": "",
+  "categories": {
+    "novel":    "小说正文",
+    "outline":  "大纲设定",
+    "character":"人物小传",
+    "world":    "地理设定",
+    "notes":    "创作笔记",
+    "other":    "其他",
+    "story":    "短故事"
+  }
+}
