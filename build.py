@@ -445,10 +445,12 @@ h4{font-size:1.1em;margin-top:1.5em;color:var(--text-secondary)}
 h5,h6{font-size:1em;margin-top:1.3em;color:var(--text-secondary)}
 
 p{text-indent:var(--p-indent);margin:.9em 0;text-align:justify;word-break:break-all}
-h1+p,h2+p,h3+p,h4+p,h5+p,h6+p{text-indent:0}
+h1+p{text-indent:0}
 
 strong{color:var(--text-primary);font-weight:700}
-em{font-style:normal;text-emphasis:filled circle;text-emphasis-position:under left;-webkit-text-emphasis:filled circle;-webkit-text-emphasis-position:under left}
+
+em{font-style:italic}
+
 del{color:var(--text-muted);text-decoration:line-through}
 a{color:var(--link-color);text-decoration:none;border-bottom:1px dashed var(--link-color);transition:all .2s}
 a:hover{color:var(--accent-light);border-bottom-style:solid}
