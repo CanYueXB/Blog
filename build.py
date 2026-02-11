@@ -29,6 +29,10 @@ from typing import Any, Dict, List, Optional
 
 from markdown_parser import MarkdownParser
 
+# 图片/资源文件扩展名
+RESOURCE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp',
+                 '.ico', '.mp4', '.mp3', '.pdf', '.zip'}
+
 # ══════════════════════════════════════════════════════
 #  配置
 # ══════════════════════════════════════════════════════
@@ -448,9 +452,7 @@ p{text-indent:var(--p-indent);margin:.9em 0;text-align:justify;word-break:break-
 h1+p{text-indent:0}
 
 strong{color:var(--text-primary);font-weight:700}
-
 em{font-style:italic}
-
 del{color:var(--text-muted);text-decoration:line-through}
 a{color:var(--link-color);text-decoration:none;border-bottom:1px dashed var(--link-color);transition:all .2s}
 a:hover{color:var(--accent-light);border-bottom-style:solid}
@@ -643,6 +645,115 @@ READER_JS = r'''(function(){
 
 
 # ══════════════════════════════════════════════════════
+#  图片路径重写
+# ══════════════════════════════════════════════════════
+
+def rewrite_asset_paths(html: str, md_rel_path: str, base_url: str) -> str:
+    """
+    重写 HTML 中的相对路径图片引用为绝对路径。
+
+    问题场景：
+        posts/设定/地理.md 中写了 ![](images/map.png)
+        构建后 HTML 在 _site/设定/地理.html
+        而图片实际在 _site/设定/images/map.png
+        但如果写了 ![](assets/banner.jpg)，HTML 会去找 _site/设定/assets/banner.jpg（不存在）
+
+    解决方案：
+        将每个相对路径解析为「相对于项目根目录」的路径，
+        然后转为以 base_url 为前缀的绝对路径。
+        这样无论 HTML 在哪一层子目录，都能正确找到资源。
+
+    参数：
+        html:         生成的 HTML 内容
+        md_rel_path:  Markdown 文件相对于 posts/ 的路径（如 "设定/地理.md"）
+        base_url:     站点的 base_url（如 "/my-novel" 或 ""）
+    """
+    from pathlib import PurePosixPath
+
+    # Markdown 文件所在目录（相对于 posts/）
+    md_dir = PurePosixPath(md_rel_path).parent  # 如 "设定" 或 "."
+
+    def resolve_src(match):
+        tag = match.group(1)       # "img" 或 "a"
+        attr = match.group(2)      # "src" 或 "href"
+        quote = match.group(3)     # 引号字符
+        path = match.group(4)      # 原始路径
+
+        # 跳过绝对 URL、data URI、锚点链接、已有 base_url 前缀
+        if (path.startswith(('http://', 'https://', 'data:', '//', '#', 'mailto:'))
+            or path.startswith(base_url + '/') and base_url):
+            return match.group(0)
+
+        # 跳过已经是绝对路径的
+        if path.startswith('/'):
+            return match.group(0)
+
+        # 解析相对路径：从 markdown 文件所在目录出发
+        # 例如 md 在 posts/设定/地理.md，引用 images/map.png
+        #   → 实际指向 posts/设定/images/map.png
+        #   → 在 _site/ 中位置为 设定/images/map.png
+        resolved = (md_dir / path)
+
+        # 规范化路径（处理 ../）
+        # PurePosixPath 不直接支持 resolve，手动处理
+        parts = []
+        for part in resolved.parts:
+            if part == '..':
+                if parts:
+                    parts.pop()
+                # 如果 ../ 超出了 posts/ 目录，说明引用的是项目根下的文件（如 assets/）
+                # 这种情况 resolved 会变成类似 "assets/banner.jpg"
+            elif part != '.':
+                parts.append(part)
+        normalized = '/'.join(parts) if parts else path
+
+        # 检查特殊情况：路径以 assets/ 开头
+        # 无论 md 在哪个子目录，assets/ 在 _site/ 中总是在根目录
+        # 所以 assets/xxx 不需要加上 md_dir 前缀
+        if path.startswith('assets/') or path.startswith('./assets/'):
+            normalized = path.lstrip('./')
+
+        # 构建绝对路径
+        abs_path = f'{base_url}/{normalized}'
+
+        return f'<{tag} {attr}={quote}{abs_path}{quote}'
+
+    # 匹配 <img src="..."> 和 <a href="...">（仅处理指向资源文件的链接）
+    html = re.sub(
+        r'<(img)\s+(src)=(["\'])([^"\']+)\3',
+        resolve_src, html
+    )
+
+    return html
+
+
+def copy_post_resources():
+    """
+    将 posts/ 目录下的非 Markdown 文件（图片等）复制到 _site/，
+    保持相同的目录结构，使得 Markdown 中的相对路径引用生效。
+
+    例如：
+        posts/设定/images/map.png → _site/设定/images/map.png
+        posts/images/hero.jpg    → _site/images/hero.jpg
+    """
+    if not POSTS_DIR.exists():
+        return 0
+
+    count = 0
+    for f in POSTS_DIR.rglob('*'):
+        if not f.is_file():
+            continue
+        if f.suffix.lower() in RESOURCE_EXTS:
+            rel = f.relative_to(POSTS_DIR)
+            dest = OUTPUT_DIR / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, dest)
+            count += 1
+
+    return count
+
+
+# ══════════════════════════════════════════════════════
 #  构建流程
 # ══════════════════════════════════════════════════════
 
@@ -672,15 +783,24 @@ def build():
                 shutil.copy2(f, dest)
         print(f'  ✅ 用户资源已复制')
 
+    # 复制 posts/ 下的图片等资源文件
+    res_count = copy_post_resources()
+    if res_count:
+        print(f'  ✅ 复制了 {res_count} 个文章内资源文件')
+
     # 收集文章
     posts = collect_posts(config)
     print(f'  📝 找到 {len(posts)} 篇文章')
 
     # 转换每篇文章
+    base_url = config.get('base_url', '')
     for p in posts:
         parser = MarkdownParser()
         body = parser.parse(p['body'])
         toc = parser.generate_toc()
+
+        # 重写图片路径：相对路径 → 绝对路径
+        body = rewrite_asset_paths(body, p['rel_path'], base_url)
 
         html = post_template(
             title=p['title'],
